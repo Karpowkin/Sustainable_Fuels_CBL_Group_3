@@ -66,10 +66,10 @@ xlabel('Ca');ylabel('p [bar]');
 xlim([-360 360]);ylim([0 50]);
 iselect = 10;
 plot(Ca(:,iselect),p(:,iselect)/bara,'LineWidth',2,'Color','r');
-YLIM = ylim;
-line([CaIVC CaIVC],YLIM,'LineWidth',1,'Color','b');
-line([CaEVO CaEVO],YLIM,'LineWidth',1,'Color','r');
-line([CaSOI CaSOI],YLIM,'LineWidth',1,'Color','y');
+% YLIM = ylim;
+% line([CaIVC CaIVC],YLIM,'LineWidth',1,'Color','b');
+% line([CaEVO CaEVO],YLIM,'LineWidth',1,'Color','r');
+% line([CaSOI CaSOI],YLIM,'LineWidth',1,'Color','y');
 set(gca,'XTick',-360:60:360,'XGrid','on','YGrid','on');
 title('All cycles in one plot.')
 hold off
@@ -91,9 +91,9 @@ xlim([0.02 0.8]);ylim([0 50]);
 set(gca,'XTick',[0.02 0.05 0.1 0.2 0.5 0.8],...
     'YTick',[0.5 1 2 5 10 20 50],'XGrid','on','YGrid','on');
 title({'pV-diagram',"log-log scale"})
+drawnow;
 
-
-%% Engine KPI
+% Engine KPI
 
 % Replace NaN when data will be obtained 
 brakePower_W = NaN;   % Mechanical shaft power [W]
@@ -106,15 +106,19 @@ KPI = CalculateKPI(brakePower_W, fuelFlow_kg_s, ...
     LHV_J_kg, CO2Flow_kg_s, NOxFlow_kg_s);
 
 disp(KPI);
+% Indicated work (average of all cycles)
+VClosed = [V; V(1,:)];
+pClosed = [p; p(1,:)];
 
-%% Indicated work (selected cycle)
-pCycle = p(:, iselect);          % [Pa]
-VCycle = V(:, iselect);          % [m^3]  
+WiCycles = sum(0.5 .* (pClosed(1:end-1,:) + pClosed(2:end,:)) .* ...
+    diff(VClosed,1,1), 1);    % [J]
+WiAverage = mean(WiCycles);
 
-% Close the p-V loop
-VClosed = [VCycle; VCycle(1)];
-pClosed = [pCycle; pCycle(1)];
+fprintf('Average indicated work over %d cycles = %.2f J\n', ...
+    Ncycles, WiAverage);
+% Maximum pressure across all cycles
+[maxPressure_Pa, maxIdx] = max(p(:));
+[maxCaIdx, maxCycle] = ind2sub(size(p), maxIdx);
 
-Wi = trapz(VClosed, pClosed);    % [J]
-
-fprintf('Cycle %d: indicated work = %.2f J\n', iselect, Wi);
+fprintf('Maximum pressure across all cycles = %.2f bar (cycle %d at %.1f CA)\n', ...
+    maxPressure_Pa/bara, maxCycle, Ca(maxCaIdx, maxCycle));
