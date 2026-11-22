@@ -55,7 +55,32 @@ NdatapointsperCycle = 720/0.2;                     % Nrows is a multitude of Nda
 Ncycles         = Nrows/NdatapointsperCycle;       % This must be an integer. If not checkwhat is going on
 Ca              = reshape(dataIn(:,1),[],Ncycles); % Both p and Ca are now matrices of size (NCa,Ncycles)
 p               = reshape(dataIn(:,2),[],Ncycles)*bara; % type 'help reshape' in the command window if you want to know what it does (reshape is a Matlab buit-in command
-p_injection     = reshape(dataIn(:,3),[],Ncycles)*bara;
+injection_current     = reshape(dataIn(:,3),[],Ncycles)*bara;
+
+%% Load Slowdaq
+FullNameSlowdaq = fullfile('Data','ExampleDataSetSlowdaq.txt');
+MatNameSlowdaq  = fullfile('Data','ExampleDataSetSlowdaq.mat');
+
+txtInfoSlowdaq = dir(FullNameSlowdaq);
+matInfoSlowdaq = dir(MatNameSlowdaq);
+
+if ~isempty(matInfoSlowdaq) && matInfoSlowdaq.datenum >= txtInfoSlowdaq.datenum
+    load(MatNameSlowdaq,'dataSlowdaq');
+else
+    fid = fopen(FullNameSlowdaq,'r');
+    dataSlowdaq = fscanf(fid,'%f',[5 Inf]).';
+    fclose(fid);
+    save(MatNameSlowdaq,'dataSlowdaq');
+end
+
+fuelMassFlow_g_s = dataSlowdaq(:,1);
+intakeTemperature_C = dataSlowdaq(:,2);
+exhaustTemperature_C = dataSlowdaq(:,3);
+intakePressure_Pa = dataSlowdaq(:,4)*bara;
+airMassFlow_g_s = dataSlowdaq(:,5);
+
+fuelFlow_kg_s = fuelMassFlow_g_s*g;
+airFlow_kg_s = airMassFlow_g_s*g;
 %% Plotting 
 f1=figure(1);
 set(f1,'Position',[200 800 1200 400]);
@@ -66,10 +91,10 @@ xlabel('Ca');ylabel('p [bar]');
 xlim([-360 360]);ylim([0 50]);
 iselect = 10;
 plot(Ca(:,iselect),p(:,iselect)/bara,'LineWidth',2,'Color','r');
-% YLIM = ylim;
-% line([CaIVC CaIVC],YLIM,'LineWidth',1,'Color','b');
-% line([CaEVO CaEVO],YLIM,'LineWidth',1,'Color','r');
-% line([CaSOI CaSOI],YLIM,'LineWidth',1,'Color','y');
+YLIM = ylim;
+line([CaIVC CaIVC],YLIM,'LineWidth',1,'Color','b');
+line([CaEVO CaEVO],YLIM,'LineWidth',1,'Color','r');
+line([CaSOI CaSOI],YLIM,'LineWidth',1,'Color','y');
 set(gca,'XTick',-360:60:360,'XGrid','on','YGrid','on');
 title('All cycles in one plot.')
 hold off
@@ -129,7 +154,7 @@ Opt.CaIVC   = CaIVC;
 Opt.CaEVO   = CaEVO;
 Opt.CaSOI   = CaSOI;
 Opt.CaPeg   = -180;
-Opt.pIntake = NaN;        % intake pressure hasnt been measured yet so NaN
+Opt.pIntake = intakePressure_Pa;       
 Opt.TIVC    = 330;        
 Opt.FiltWin = 4;          
 Opt.Gamma   = 'nasa';     % or constant
