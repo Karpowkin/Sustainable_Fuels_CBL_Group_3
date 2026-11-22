@@ -118,3 +118,55 @@ pClosed = [pCycle; pCycle(1)];
 Wi = trapz(VClosed, pClosed);    % [J]
 
 fprintf('Cycle %d: indicated work = %.2f J\n', iselect, Wi);
+
+%% Combustion characterisation
+Opt.CaIVC   = CaIVC;
+Opt.CaEVO   = CaEVO;
+Opt.CaSOI   = CaSOI;
+Opt.CaPeg   = -180;
+Opt.pIntake = NaN;        % intake pressure hasnt been measured yet so NaN
+Opt.TIVC    = 330;        
+Opt.FiltWin = 4;          
+Opt.Gamma   = 'nasa';     % or constant
+
+% Mean cycle
+pMean = mean(p, 2);
+CC = CombustionAnalysis(Ca(:,1), pMean, V(:,1), SpS, Opt);
+fprintf('\nMean cycle: CA10 = %.1f, CA50 = %.1f, CA90 = %.1f deg ATDC\n', CC.CA10, CC.CA50, CC.CA90);
+fprintf('Burn duration = %.1f deg, ignition delay = %.1f deg, Qtotal = %.0f J\n', ...
+        CC.BurnDuration, CC.IgnitionDelay, CC.Qtotal);
+fprintf('pmax = %.1f bar at %.1f deg ATDC\n', CC.pMax/bara, CC.CApMax);
+
+% Per cycle
+CA50cyc = nan(Ncycles,1);  pMaxcyc = nan(Ncycles,1);
+for i = 1:Ncycles
+    Ci = CombustionAnalysis(Ca(:,i), p(:,i), V(:,i), SpS, Opt);
+    CA50cyc(i) = Ci.CA50;
+    pMaxcyc(i) = Ci.pMax;
+end
+fprintf('CA50 per cycle: mean %.2f, std %.2f deg | pmax per cycle: mean %.1f, std %.2f bar\n', ...
+        mean(CA50cyc), std(CA50cyc), mean(pMaxcyc)/bara, std(pMaxcyc)/bara);
+
+% Plots
+figure(3)
+plot(CC.Ca, CC.aROHR)
+xlabel('Ca [deg]'); 
+ylabel('aROHR [J/deg]')
+xlim([-30 90]); 
+grid on
+title('Apparent rate of heat release')
+
+figure(4)
+plot(CC.Ca, CC.xb)
+xlabel('Ca [deg]'); 
+ylabel('Mass fraction burned [-]')
+xlim([-30 90]); 
+grid on
+title('Cumulative heat release')
+
+figure(5)
+plot(1:Ncycles, CA50cyc, 'o')
+xlabel('Cycle [-]'); 
+ylabel('CA50 [deg ATDC]'); 
+grid on
+title('CA50 per cycle')
