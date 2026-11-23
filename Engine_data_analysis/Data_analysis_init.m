@@ -149,15 +149,85 @@ fprintf('Maximum pressure across all cycles = %.2f bar (cycle %d at %.1f CA)\n',
     maxPressure_Pa/bara, maxCycle, Ca(maxCaIdx, maxCycle));
 
 
-%% Combustion characterisation
+%% ===== Combustion characterisation (CHANGED: new settings, diagnostics and SOI_run) =====
+% check that the variables used below exist
+needed = {'Ca','p','V','SpS','CaIVC','CaEVO','CaSOI','bara','dm','Ncycles','Runiv'};
+for k = 1:numel(needed)
+    if ~exist(needed{k},'var'), warning('Missing variable: %s', needed{k}); end
+end
+assert(isequal(size(V), size(Ca)), 'V must have the same size as Ca');
+
+% --- settings -------------------------------------------------------------
+SOI_run    = NaN;        % [deg bTDC] of THIS run (e.g. 14, 16, 18, 20); NaN = use CaSOI from the template
+usePegging = true;       % CHANGED: pegging on (the intake pressure is not measured, so ambient is used)
 Opt.CaIVC   = CaIVC;
 Opt.CaEVO   = CaEVO;
-Opt.CaSOI   = CaSOI;
+if ~isnan(SOI_run), Opt.CaSOI = -SOI_run; else, Opt.CaSOI = CaSOI; end %CHANGED
 Opt.CaPeg   = -180;
-Opt.pIntake = intakePressure_Pa;       
 Opt.TIVC    = 330;        
 Opt.FiltWin = 4;          
 Opt.Gamma   = 'nasa';     % or constant
+Opt.pIntake = intakePressure_Pa;  %CHANGED pegging on (the intake pressure is not measured, so ambient is used)
+Opt.PegMode = 'polytropic';   % 'polytropic' or 'ambient'
+Opt.CaPoly  = [-110 -50];     % two points on the compression stroke, before ignition
+Opt.kPoly   = 1.32;           % assumed n for air compression (try 1.30-1.35)
+
+%% ===== DIAGNOSTICS (print and check, then comment out if you like) =====
+Cam = Ca(:,1);  pm = mean(p,2);  Vm = V(:,1);
+
+% 1) Volume function check
+fprintf('\n--- DIAGNOSTICS ---\n');
+fprintf('V(0)    = %.1f cm^3 (expect 35.2)\n', interp1(Cam,Vm,0)*1e6);
+fprintf('V(-180) = %.1f cm^3 (expect 757)\n',  interp1(Cam,Vm,-180)*1e6);
+
+% 2) Raw pressure at BDC and position of the pressure peak
+iB = abs(Cam + 180) <= 3;
+fprintf('raw p at BDC = %.2f bar (expect about 1.0 absolute)\n', mean(pm(iB))/bara);
+[~,ip] = max(pm);  fprintf('pmax at %.1f deg\n', Cam(ip));
+
+% 3) Compression exponent, raw and pegged to 1.0 bar
+idx   = Cam >= -100 & Cam <= -30;
+pPeg  = pm - mean(pm(iB)) + 1.0e5;
+c = polyfit(log(Vm(idx)), log(pm(idx)),   1);  n_raw = -c(1);
+c = polyfit(log(Vm(idx)), log(pPeg(idx)), 1);  n_peg = -c(1);
+fprintf('n raw = %.2f | n pegged = %.2f (expect 1.25-1.35)\n', n_raw, n_peg);
+
+% 4) Compare: no pegging, ambient pegging, polytropic pegging
+OptT = Opt;
+OptT.PegMode = 'none';       CC0 = CombustionAnalysis(Cam,pm,Vm,SpS,OptT);
+OptT.PegMode = 'ambient';    OptT.pIntake = 1.0e5;
+CC1 = CombustionAnalysis(Cam,pm,Vm,SpS,OptT);
+OptT.PegMode = 'polytropic'; CC2 = CombustionAnalysis(Cam,pm,Vm,SpS,OptT);
+base = @(CC) mean(CC.aROHR(CC.Ca >= -60 & CC.Ca <= -20));
+fprintf('%-11s | aROHR0 | CA50 | CA90 | Qtot\n','peg');
+fprintf('%-11s | %6.2f | %4.1f | %4.1f | %4.0f\n','none',      base(CC0),CC0.CA50,CC0.CA90,CC0.Qtotal);
+fprintf('%-11s | %6.2f | %4.1f | %4.1f | %4.0f\n','ambient',   base(CC1),CC1.CA50,CC1.CA90,CC1.Qtotal);
+fprintf('%-11s | %6.2f | %4.1f | %4.1f | %4.0f\n','polytropic',base(CC2),CC2.CA50,CC2.CA90,CC2.Qtotal);
+fprintf('Rair = %g | gamma %.3f..%.3f\n', CC2.Rair, min(CC2.gamma), max(CC2.gamma));
+
+% 5) Log-log pV against an ideal polytrope (n = 1.30, 1 bar at BDC)
+figure(6); loglog(Vm/dm^3, pPeg/bara,'b'); hold on
+i0 = find(Cam >= -180,1);
+loglog(Vm/dm^3, (Vm(i0)./Vm).^1.30, 'k--'); grid on
+xlabel('V [dm^3]'); ylabel('p [bar]'); legend('measured (pegged)','n = 1.30');
+title('Log-log pV: compare slope with the ideal line');
+
+% 6) SOI from the injector signal vs the value used
+inj = mean(p_injection,2);  iS = find(inj > 0.5*max(inj),1);
+fprintf('SOI from injector signal = %.1f deg | Opt.CaSOI = %.1f deg\n', Cam(iS), Opt.CaSOI);
+fprintf('(the first edge may be a pilot injection - agree which one counts as SOI)\n');
+fprintf('--- END DIAGNOSTICS ---\n\n');
+
+% 7) TDC phasing test
+fprintf('\n--- TDC shift test (ambient peg) ---\n');
+OptS = Opt; OptS.PegMode = 'ambient'; OptS.pIntake = 1.0e5;
+for sh = -2:1:2
+    Vs  = CylinderVolume(Cam + sh, Cyl);
+    cc  = polyfit(log(Vs(idx)), log(pPeg(idx)), 1);
+    Cs  = CombustionAnalysis(Cam,pm,Vs,SpS,OptS);
+    fprintf('shift %+d deg: n = %.2f | pre-ign aROHR %.2f | CA50 %.1f | CA90 %.1f | Qtot %.0f J\n', ...
+        sh, -cc(1), mean(Cs.aROHR(Cs.Ca >= -60 & Cs.Ca <= -20)), Cs.CA50, Cs.CA90, Cs.Qtotal);
+end
 
 % Mean cycle
 pMean = mean(p, 2);
@@ -166,6 +236,8 @@ fprintf('\nMean cycle: CA10 = %.1f, CA50 = %.1f, CA90 = %.1f deg ATDC\n', CC.CA1
 fprintf('Burn duration = %.1f deg, ignition delay = %.1f deg, Qtotal = %.0f J\n', ...
         CC.BurnDuration, CC.IgnitionDelay, CC.Qtotal);
 fprintf('pmax = %.1f bar at %.1f deg ATDC\n', CC.pMax/bara, CC.CApMax);
+
+
 
 % Per cycle
 CA50cyc = nan(Ncycles,1);  pMaxcyc = nan(Ncycles,1);
@@ -176,6 +248,18 @@ for i = 1:Ncycles
 end
 fprintf('CA50 per cycle: mean %.2f, std %.2f deg | pmax per cycle: mean %.1f, std %.2f bar\n', ...
         mean(CA50cyc), std(CA50cyc), mean(pMaxcyc)/bara, std(pMaxcyc)/bara);
+
+fprintf('Polytropic peg offset = %.3f bar | implied p at BDC = %.2f bar\n', ...
+    CC.pegOffset/bara, (interp1(Cam,pm,-180) + CC.pegOffset)/bara);
+
+% sensitivity to the assumed exponent
+for kk = [1.28 1.32 1.36]
+    OptK = Opt; OptK.kPoly = kk;
+    Ck = CombustionAnalysis(Cam,pm,Vm,SpS,OptK);
+    fprintf('k=%.2f: offset %.3f bar | CA50 %.1f | CA90 %.1f | Qtot %.0f J | pre-ign aROHR %.2f\n', ...
+        kk, Ck.pegOffset/bara, Ck.CA50, Ck.CA90, Ck.Qtotal, ...
+        mean(Ck.aROHR(Ck.Ca >= -60 & Ck.Ca <= -20)));
+end
 
 % Plots
 figure(3)
@@ -198,5 +282,5 @@ figure(5)
 plot(1:Ncycles, CA50cyc, 'o')
 xlabel('Cycle [-]'); 
 ylabel('CA50 [deg ATDC]'); 
-grid on
-title('CA50 per cycle')
+grid on   % To go back to the old behaviour, set usePegging = false and leave SOI_run = NaN. %
+title('CA50 per cycle')  % Then the only differences are the ±3° averaging and the 60° limit in CombustionAnalysis.m. 
